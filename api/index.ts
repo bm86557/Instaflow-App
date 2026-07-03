@@ -8,14 +8,14 @@ dotenv.config({ path: './backend/.env.local' });
 dotenv.config();
 
 // Initialize Firebase Admin SDK and other shared backend configuration.
-import '../backend/server/config/firebase';
+import './config/firebase.ts';
 
-import authRoutes from '../backend/server/routes/auth.routes';
-import userRoutes from '../backend/server/routes/user.routes';
-import analyticsRoutes from '../backend/server/routes/analytics.routes';
-import automationRoutes from '../backend/server/routes/automation.routes';
-import webhookRoutes from '../backend/server/routes/webhook.routes';
-import aiRoutes from '../backend/server/routes/ai.routes';
+import authRoutes from './routes/auth.routes.ts';
+import userRoutes from './routes/user.routes.ts';
+import analyticsRoutes from './routes/analytics.routes.ts';
+import automationRoutes from './routes/automation.routes.ts';
+import webhookRoutes from './routes/webhook.routes.ts';
+import aiRoutes from './routes/ai.routes.ts';
 
 const app = express();
 app.set('trust proxy', true);
