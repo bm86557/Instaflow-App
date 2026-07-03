@@ -1,0 +1,13 @@
+{
+  "name": "InstaFlow Automation",
+  "description": "Professional Instagram automation platform for scheduling posts, auto-replying to comments/DMs, and tracking advanced analytics.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI-powered replies",
+    "Post scheduling",
+    "Real-time analytics"
+  ]
+}
