@@ -207,7 +207,10 @@ router.get('/instagram/callback', async (req, res) => {
 
 // 3. Logout
 router.post('/logout', (req, res) => {
-  req.session = null;
+  // Clear session for cookie-session
+  if (req.session) {
+    req.session = null as any;
+  }
   res.json({ success: true });
 });
 
