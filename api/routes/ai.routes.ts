@@ -30,33 +30,38 @@ router.post('/generate', async (req: Request, res: Response) => {
     }
 
     const ai = getAIInstance();
+    const model = ai.models.generateContent;
     
-    // Configure generation parameters
-    const config: any = {
+    // Build request config
+    const requestConfig: any = {
       model: 'gemini-2.0-flash-exp',
+      contents: prompt,
     };
 
     if (systemInstruction) {
-      config.systemInstruction = systemInstruction;
+      requestConfig.systemInstruction = systemInstruction;
     }
 
     if (temperature !== undefined) {
-      config.temperature = temperature;
+      requestConfig.generationConfig = {
+        ...requestConfig.generationConfig,
+        temperature,
+      };
     }
 
     if (maxTokens) {
-      config.maxOutputTokens = maxTokens;
+      requestConfig.generationConfig = {
+        ...requestConfig.generationConfig,
+        maxOutputTokens: maxTokens,
+      };
     }
 
     // Generate content
-    const result = await ai.generate({
-      ...config,
-      prompt,
-    });
+    const result = await model(requestConfig);
 
     return res.json({
       success: true,
-      text: result.text,
+      text: result.text || result.response?.text() || '',
       response: result,
     });
 
@@ -86,25 +91,27 @@ router.post('/chat', async (req: Request, res: Response) => {
     }
 
     const ai = getAIInstance();
+    const model = ai.models.generateContent;
     
-    const config: any = {
+    const requestConfig: any = {
       model: 'gemini-2.0-flash-exp',
-      history: history || [],
+      contents: message,
     };
 
     if (systemInstruction) {
-      config.systemInstruction = systemInstruction;
+      requestConfig.systemInstruction = systemInstruction;
+    }
+
+    if (history && history.length > 0) {
+      requestConfig.history = history;
     }
 
     // Generate chat response
-    const result = await ai.generateContent({
-      ...config,
-      prompt: message,
-    });
+    const result = await model(requestConfig);
 
     return res.json({
       success: true,
-      text: result.text,
+      text: result.text || result.response?.text() || '',
       response: result,
     });
 
