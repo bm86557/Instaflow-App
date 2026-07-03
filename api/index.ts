@@ -15,6 +15,7 @@ import userRoutes from '../backend/server/routes/user.routes.ts';
 import analyticsRoutes from '../backend/server/routes/analytics.routes.ts';
 import automationRoutes from '../backend/server/routes/automation.routes.ts';
 import webhookRoutes from '../backend/server/routes/webhook.routes.ts';
+import aiRoutes from '../backend/server/routes/ai.routes.ts';
 
 const app = express();
 app.set('trust proxy', true);
@@ -38,6 +39,7 @@ app.use(`${apiBase}/user`, userRoutes);
 app.use(`${apiBase}/instagram`, analyticsRoutes);
 app.use(`${apiBase}/automation`, automationRoutes);
 app.use(`${apiBase}/webhooks`, webhookRoutes);
+app.use(`${apiBase}/ai`, aiRoutes);
 
 // Export the Express app as the Vercel serverless handler.
 export default function handler(req: any, res: any) {
