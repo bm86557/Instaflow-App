@@ -33,15 +33,17 @@ app.use(
   })
 );
 
-const apiBase = process.env.API_BASE_PATH || '/api';
-app.use(`${apiBase}/auth`, authRoutes);
-app.use(`${apiBase}/user`, userRoutes);
-app.use(`${apiBase}/instagram`, analyticsRoutes);
-app.use(`${apiBase}/automation`, automationRoutes);
-app.use(`${apiBase}/webhooks`, webhookRoutes);
-app.use(`${apiBase}/ai`, aiRoutes);
+// Mount all routes under /api prefix
+app.use('/api/auth', authRoutes);
+app.use('/api/user', userRoutes);
+app.use('/api/instagram', analyticsRoutes);
+app.use('/api/automation', automationRoutes);
+app.use('/api/webhooks', webhookRoutes);
+app.use('/api/ai', aiRoutes);
+
+// Also mount auth routes at /auth for callback compatibility
+app.use('/auth', authRoutes);
 
 // Export the Express app as the Vercel serverless handler.
-export default function handler(req: any, res: any) {
-  return app(req, res);
-}
+// This handles ALL routes through a single serverless function
+export default app;
