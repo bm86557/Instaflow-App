@@ -1293,37 +1293,61 @@ app.get('/api/webhooks/instagram', (req, res) => {
 });
 
 app.post('/api/webhooks/instagram', async (req, res) => {
-  console.log('[Webhook] Notification received');
+  console.log('[Webhook] =====================================');
+  console.log('[Webhook] Notification received at:', new Date().toISOString());
+  console.log('[Webhook] Request body:', JSON.stringify(req.body, null, 2));
+  console.log('[Webhook] =====================================');
   
+  // Always respond 200 OK immediately
   res.status(200).send('EVENT_RECEIVED');
 
   try {
     const body = req.body;
+
+    if (!body || typeof body !== 'object') {
+      console.error('[Webhook] Invalid body - not an object');
+      return;
+    }
+
+    console.log('[Webhook] Body object type:', body.object);
 
     if (body.object !== 'instagram') {
       console.log('[Webhook] Not an Instagram notification, ignoring');
       return;
     }
 
+    console.log('[Webhook] ✅ This is an Instagram notification');
+    console.log('[Webhook] Entry count:', (body.entry || []).length);
+
     for (const entry of body.entry || []) {
       const instagramUserId = entry.id;
       
       console.log('[Webhook] Processing entry for Instagram user:', instagramUserId);
+      console.log('[Webhook] Changes count:', (entry.changes || []).length);
 
       for (const change of entry.changes || []) {
+        console.log('[Webhook] Change field:', change.field);
+        
         if (change.field === 'comments') {
           const commentData = change.value;
           
+          console.log('[Webhook] ✅ Comment event detected!');
           console.log('[Webhook] Comment data:', JSON.stringify(commentData, null, 2));
 
+          // Call processComment asynchronously
+          console.log('[Webhook] Calling processComment function...');
           processComment(instagramUserId, commentData).catch(err => {
-            console.error('[Webhook] Error in processComment:', err);
+            console.error('[Webhook] ❌ Error in processComment:', err);
+            console.error('[Webhook] Error stack:', err.stack);
           });
+        } else {
+          console.log('[Webhook] Ignoring change field:', change.field);
         }
       }
     }
-  } catch (error) {
-    console.error('[Webhook] Error processing notification:', error);
+  } catch (error: any) {
+    console.error('[Webhook] ❌ Error processing notification:', error);
+    console.error('[Webhook] Error stack:', error.stack);
   }
 });
 
