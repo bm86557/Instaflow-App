@@ -17,6 +17,7 @@ import {
 import { motion } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { logoutUser } from '../lib/firebase';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -48,9 +49,10 @@ export default function Sidebar({ activeTab, setActiveTab, isCollapsed, setIsCol
         method: 'POST',
         credentials: 'include'
       });
+      await logoutUser();
       window.location.reload();
     } catch (err) {
-      console.error('Logout failed');
+      console.error('Logout failed:', err);
     }
   };
 

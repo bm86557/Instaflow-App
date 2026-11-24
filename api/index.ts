@@ -506,23 +506,34 @@ async function processComment(instagramUserId: string, commentData: any) {
 // HELPER FUNCTIONS
 // ============================================================================
 
+function isLocalHost(host?: string | null): boolean {
+  if (!host) return false;
+  const hostname = host.split(':')[0].toLowerCase();
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
 function resolvePublicAppUrl(req: express.Request): string {
   const forwardedProto = req.get('x-forwarded-proto')?.split(',')[0]?.trim();
   const forwardedHost = req.get('x-forwarded-host')?.split(',')[0]?.trim() || req.get('x-forwarded-server')?.split(',')[0]?.trim();
   const host = req.get('host');
+  const resolvedHost = forwardedHost || host || 'localhost:3000';
+  const protocol = forwardedProto || req.protocol || 'http';
 
-  if (forwardedProto && forwardedHost) {
-    return `${forwardedProto}://${forwardedHost}`;
+  // Always use the local origin when running on localhost so a production APP_URL in .env doesn't hijack local OAuth
+  if (isLocalHost(resolvedHost)) {
+    return `${protocol}://${resolvedHost}`.replace(/\/+$/, '');
   }
 
-  const configuredAppUrl = process.env.APP_URL?.trim();
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`.replace(/\/+$/, '');
+  }
+
+  const configuredAppUrl = process.env.APP_URL?.trim().replace(/\/+$/, '');
   if (configuredAppUrl && configuredAppUrl !== 'http://localhost:3000' && configuredAppUrl !== 'http://127.0.0.1:3000') {
     return configuredAppUrl;
   }
 
-  const protocol = forwardedProto || req.protocol || 'http';
-  const resolvedHost = forwardedHost || host || 'localhost:3000';
-  return `${protocol}://${resolvedHost}`;
+  return `${protocol}://${resolvedHost}`.replace(/\/+$/, '');
 }
 
 function errorPage(code: string, message: string) {
