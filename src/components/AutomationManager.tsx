@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Plus, 
   Trash2,
-  Zap
+  Zap,
+  RefreshCw
 } from 'lucide-react';
 import * as automationService from '../services/automationService';
 import { AutomationRule } from '../types/automationTypes';
@@ -13,6 +14,8 @@ export default function AutomationManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
+  const [pollStatus, setPollStatus] = useState<string | null>(null);
   const [newRule, setNewRule] = useState({ keyword: '', reply: '', type: 'COMMENT' });
 
   useEffect(() => {
@@ -69,6 +72,20 @@ export default function AutomationManager() {
     }
   };
 
+  const handleCheckComments = async () => {
+    try {
+      setIsPolling(true);
+      setPollStatus(null);
+      const res = await automationService.pollComments();
+      setPollStatus(`Checked ${res.checkedComments} recent comments across ${res.checkedMedia} posts.`);
+      await loadRules();
+    } catch (err: any) {
+      setPollStatus('Check failed: ' + err.message);
+    } finally {
+      setIsPolling(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-8">
@@ -106,13 +123,28 @@ export default function AutomationManager() {
           <h1 className="text-4xl font-bold text-white tracking-tight">Automation Rules</h1>
           <p className="text-white/40 mt-1">Set up keywords to automatically trigger replies to comments and DMs.</p>
         </div>
-        <button 
-          onClick={() => setIsAdding(true)}
-          className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20"
-        >
-          <Plus className="w-5 h-5" /> Add Rule
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleCheckComments}
+            disabled={isPolling}
+            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white px-4 py-3 rounded-xl font-semibold transition-all border border-white/10"
+          >
+            <RefreshCw className={`w-4 h-4 ${isPolling ? 'animate-spin' : ''}`} />
+            {isPolling ? 'Checking...' : 'Check Comments'}
+          </button>
+          <button 
+            onClick={() => setIsAdding(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-indigo-500/20"
+          >
+            <Plus className="w-5 h-5" /> Add Rule
+          </button>
+        </div>
       </header>
+      {pollStatus && (
+        <div className="px-4 py-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-sm text-indigo-200">
+          {pollStatus}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="md:col-span-2 space-y-4">

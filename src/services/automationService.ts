@@ -170,3 +170,23 @@ export async function toggleRule(ruleId: string): Promise<AutomationRule> {
     throw error;
   }
 }
+
+/**
+ * Poll recent Instagram comments via Graph API (fallback when webhooks are unavailable)
+ */
+export async function pollComments(): Promise<{ checkedMedia: number; checkedComments: number }> {
+  const token = await getAuthToken();
+  const response = await fetch(`${API_BASE}/poll-comments`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to poll comments');
+  }
+
+  return await response.json();
+}

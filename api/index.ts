@@ -502,6 +502,70 @@ async function processComment(instagramUserId: string, commentData: any) {
   }
 }
 
+const POLL_MAX_COMMENT_AGE_MS = 24 * 60 * 60 * 1000;
+
+async function pollCommentsForUser(firebaseUid: string) {
+  const userDoc = await db.collection('users').doc(firebaseUid).get();
+  if (!userDoc.exists) {
+    return { checkedMedia: 0, checkedComments: 0, skipped: 'User not found' };
+  }
+
+  const userData = userDoc.data() || {};
+  const instagramUserId = userData.instagramUserId;
+  const accessToken = userData.instagramAccessToken;
+
+  if (!instagramUserId || !accessToken) {
+    return { checkedMedia: 0, checkedComments: 0, skipped: 'Instagram not connected' };
+  }
+
+  const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, {
+    params: {
+      fields: 'id,timestamp',
+      limit: 10,
+      access_token: accessToken
+    }
+  });
+
+  const mediaList: any[] = mediaRes.data?.data || [];
+  let checkedComments = 0;
+
+  for (const media of mediaList) {
+    try {
+      const commentsRes = await axios.get(`https://graph.facebook.com/v19.0/${media.id}/comments`, {
+        params: {
+          fields: 'id,text,timestamp,from,username',
+          limit: 25,
+          access_token: accessToken
+        }
+      });
+
+      const comments: any[] = commentsRes.data?.data || [];
+      for (const comment of comments) {
+        if (!comment?.id || !comment?.text) continue;
+
+        if (comment.timestamp) {
+          const ageMs = Date.now() - new Date(comment.timestamp).getTime();
+          if (!Number.isNaN(ageMs) && ageMs > POLL_MAX_COMMENT_AGE_MS) {
+            continue;
+          }
+        }
+
+        checkedComments++;
+        await processComment(instagramUserId, {
+          id: comment.id,
+          text: comment.text,
+          from: comment.from || (comment.username ? { id: '', username: comment.username } : undefined),
+          media: { id: media.id }
+        });
+      }
+    } catch (err: any) {
+      console.error(`[Poll] Failed to fetch comments for media ${media.id}:`, err.response?.data || err.message);
+    }
+  }
+
+  return { checkedMedia: mediaList.length, checkedComments };
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -1277,6 +1341,18 @@ app.patch('/api/automation/rules/:ruleId/toggle', verifyFirebaseToken, async (re
   }
 });
 
+// Poll comments manually (Graph API fallback when webhooks are unavailable)
+app.post('/api/automation/poll-comments', verifyFirebaseToken, async (req: any, res) => {
+  const firebaseUid = req.firebaseUid;
+  try {
+    const result = await pollCommentsForUser(firebaseUid);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('[Automation] Error polling comments:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to poll comments', details: error.message });
+  }
+});
+
 // ============================================================================
 // WEBHOOK ROUTES (inlined from routes/webhook.routes.ts)
 // ============================================================================
@@ -1308,23 +1384,20 @@ app.post('/api/webhooks/instagram', async (req, res) => {
   console.log('[Webhook] Notification received at:', new Date().toISOString());
   console.log('[Webhook] Request body:', JSON.stringify(req.body, null, 2));
   console.log('[Webhook] =====================================');
-  
-  // Always respond 200 OK immediately
-  res.status(200).send('EVENT_RECEIVED');
 
   try {
     const body = req.body;
 
     if (!body || typeof body !== 'object') {
       console.error('[Webhook] Invalid body - not an object');
-      return;
+      return res.status(200).send('EVENT_RECEIVED');
     }
 
     console.log('[Webhook] Body object type:', body.object);
 
     if (body.object !== 'instagram') {
       console.log('[Webhook] Not an Instagram notification, ignoring');
-      return;
+      return res.status(200).send('EVENT_RECEIVED');
     }
 
     console.log('[Webhook] ✅ This is an Instagram notification');
@@ -1345,12 +1418,14 @@ app.post('/api/webhooks/instagram', async (req, res) => {
           console.log('[Webhook] ✅ Comment event detected!');
           console.log('[Webhook] Comment data:', JSON.stringify(commentData, null, 2));
 
-          // Call processComment asynchronously
+          // Await processing before responding so Vercel does not freeze the serverless function early
           console.log('[Webhook] Calling processComment function...');
-          processComment(instagramUserId, commentData).catch(err => {
+          try {
+            await processComment(instagramUserId, commentData);
+          } catch (err: any) {
             console.error('[Webhook] ❌ Error in processComment:', err);
-            console.error('[Webhook] Error stack:', err.stack);
-          });
+            console.error('[Webhook] Error stack:', err?.stack);
+          }
         } else {
           console.log('[Webhook] Ignoring change field:', change.field);
         }
@@ -1360,6 +1435,8 @@ app.post('/api/webhooks/instagram', async (req, res) => {
     console.error('[Webhook] ❌ Error processing notification:', error);
     console.error('[Webhook] Error stack:', error.stack);
   }
+
+  return res.status(200).send('EVENT_RECEIVED');
 });
 
 // ============================================================================
