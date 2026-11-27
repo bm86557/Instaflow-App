@@ -1188,7 +1188,8 @@ app.get('/api/auth/instagram-direct/callback', async (req, res) => {
     `);
   } catch (error: any) {
     console.error('[Instagram Direct OAuth Error]:', error.response?.data || error.message);
-    res.send(errorPage('OAUTH_ERROR', error.response?.data?.error_message || error.response?.data?.error?.message || error.message));
+    const errMsg = error.response?.data?.error_message || error.response?.data?.error?.message || error.message;
+    res.send(errorPage('OAUTH_ERROR', `${errMsg} (redirect_uri: ${REDIRECT_URI}, app_id: ${INSTAGRAM_APP_ID})`));
   }
 });
 
