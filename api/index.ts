@@ -1758,6 +1758,263 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
   }
 });
 
+app.get('/api/instagram/analytics-detailed', verifyFirebaseToken, async (req: any, res) => {
+  const firebaseUid = req.firebaseUid;
+  const days = req.query.days === '30' ? 30 : 7;
+
+  try {
+    const userData = await getUserData(firebaseUid);
+    if (!userData || !userData.instagramAccessToken || !userData.instagramUserId) {
+      return res.status(400).json({ error: 'Instagram account not connected' });
+    }
+
+    const { instagramAccessToken, instagramUserId } = userData;
+    const currentIgId = String(instagramUserId);
+    const authProvider = userData.instagramAuthProvider === 'instagram' ? 'instagram' : 'facebook';
+    const graphBase = getInstagramGraphBase(userData);
+
+    const profilePath = authProvider === 'instagram' ? 'me' : currentIgId;
+    const profileRes = await axios.get(`${graphBase}/${profilePath}`, {
+      params: {
+        fields: 'username,followers_count,follows_count,media_count,profile_picture_url',
+        access_token: instagramAccessToken
+      }
+    });
+
+    const followersCount = Number(profileRes.data?.followers_count ?? 0);
+    const followsCount = Number(profileRes.data?.follows_count ?? 0);
+    const mediaCount = Number(profileRes.data?.media_count ?? 0);
+    const username = profileRes.data?.username || userData.instagramUsername || '';
+
+    const now = new Date();
+    const todayKey = now.toISOString().slice(0, 10);
+    await db.collection('users')
+      .doc(firebaseUid)
+      .collection('analyticsSnapshots')
+      .doc(`${currentIgId}_${todayKey}`)
+      .set(
+        {
+          instagramUserId: currentIgId,
+          date: todayKey,
+          followersCount,
+          followsCount,
+          mediaCount,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+
+    const dayBuckets = new Map<string, { iso: string; date: string; reach: number; engagement: number; followersChange: number }>();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      dayBuckets.set(iso, { iso, date: label, reach: 0, engagement: 0, followersChange: 0 });
+    }
+
+    const until = Math.floor(now.getTime() / 1000);
+    const since = until - days * 24 * 60 * 60;
+
+    let totalReach = 0;
+    try {
+      const reachRes = await axios.get(`${graphBase}/${currentIgId}/insights`, {
+        params: { metric: 'reach', period: 'day', since, until, access_token: instagramAccessToken }
+      });
+      const reachValues: any[] = reachRes.data?.data?.[0]?.values || [];
+      for (const item of reachValues) {
+        const val = Number(item.value || 0);
+        totalReach += val;
+        if (item.end_time) {
+          const iso = new Date(item.end_time).toISOString().slice(0, 10);
+          const bucket = dayBuckets.get(iso);
+          if (bucket) bucket.reach = val;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Analytics Detailed] Reach insights unavailable:', err.response?.data?.error?.message || err.message);
+    }
+
+    let growthSource: 'meta' | 'snapshots' | 'unavailable' = 'unavailable';
+    let growthUnavailableReason: string | null = null;
+    try {
+      const growthRes = await axios.get(`${graphBase}/${currentIgId}/insights`, {
+        params: { metric: 'follower_count', period: 'day', since, until, access_token: instagramAccessToken }
+      });
+      const growthValues: any[] = growthRes.data?.data?.[0]?.values || [];
+      if (growthValues.length > 0) {
+        growthSource = 'meta';
+        for (const item of growthValues) {
+          if (item.end_time) {
+            const iso = new Date(item.end_time).toISOString().slice(0, 10);
+            const bucket = dayBuckets.get(iso);
+            if (bucket) bucket.followersChange = Number(item.value || 0);
+          }
+        }
+      }
+    } catch (err: any) {
+      growthUnavailableReason = followersCount < 100
+        ? 'Instagram requires 100+ followers for daily follower growth insights. Recording daily snapshots automatically.'
+        : (err.response?.data?.error?.message || 'Daily follower growth insights unavailable for this account.');
+    }
+
+    if (growthSource === 'unavailable') {
+      try {
+        const snapQuery = await db.collection('users')
+          .doc(firebaseUid)
+          .collection('analyticsSnapshots')
+          .where('instagramUserId', '==', currentIgId)
+          .get();
+        const snaps = snapQuery.docs
+          .map((doc) => doc.data())
+          .filter((s: any) => s.date && dayBuckets.has(s.date))
+          .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)));
+
+        if (snaps.length >= 1) {
+          growthSource = 'snapshots';
+          let prevCount: number | null = null;
+          for (const s of snaps) {
+            const bucket = dayBuckets.get(s.date);
+            if (bucket) {
+              bucket.followersChange = prevCount === null ? 0 : Number(s.followersCount) - prevCount;
+            }
+            prevCount = Number(s.followersCount);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Analytics Detailed] Snapshot fallback failed:', err.message);
+      }
+    }
+
+    let ageDistribution: Array<{ name: string; value: number }> = [];
+    let demographicsUnavailableReason: string | null = null;
+    try {
+      const demoRes = await axios.get(`${graphBase}/${currentIgId}/insights`, {
+        params: {
+          metric: 'follower_demographics',
+          period: 'lifetime',
+          metric_type: 'total_value',
+          breakdown: 'age',
+          access_token: instagramAccessToken
+        }
+      });
+      const results: any[] = demoRes.data?.data?.[0]?.total_value?.breakdowns?.[0]?.results || [];
+      ageDistribution = results
+        .map((r: any) => ({
+          name: Array.isArray(r.dimension_values) ? String(r.dimension_values[0]) : 'Other',
+          value: Number(r.value || 0)
+        }))
+        .filter((item) => item.value > 0)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      if (ageDistribution.length === 0) {
+        demographicsUnavailableReason = followersCount < 100
+          ? 'Instagram requires at least 100 followers to provide age demographics.'
+          : 'Instagram has not generated age demographics data for this account yet.';
+      }
+    } catch (err: any) {
+      demographicsUnavailableReason = followersCount < 100
+        ? 'Instagram requires at least 100 followers to provide age demographics.'
+        : (err.response?.data?.error?.message || 'Age demographics are unavailable for this account.');
+    }
+
+    let posts: any[] = [];
+    try {
+      const mediaRes = await axios.get(`${graphBase}/${currentIgId}/media`, {
+        params: {
+          fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
+          limit: 50,
+          access_token: instagramAccessToken
+        }
+      });
+      posts = mediaRes.data?.data || [];
+    } catch (err: any) {
+      console.warn('[Analytics Detailed] Media fetch failed:', err.response?.data || err.message);
+    }
+
+    let totalPostEngagements = 0;
+    const contentMixCounts: Record<string, number> = { IMAGE: 0, VIDEO: 0, CAROUSEL_ALBUM: 0 };
+
+    for (const post of posts) {
+      const likes = Number(post.like_count || 0);
+      const comments = Number(post.comments_count || 0);
+      const postEng = likes + comments;
+      totalPostEngagements += postEng;
+
+      const mType = post.media_type === 'CAROUSEL_ALBUM' ? 'CAROUSEL_ALBUM' : (post.media_type === 'VIDEO' ? 'VIDEO' : 'IMAGE');
+      contentMixCounts[mType] = (contentMixCounts[mType] || 0) + 1;
+
+      if (post.timestamp) {
+        const iso = new Date(post.timestamp).toISOString().slice(0, 10);
+        const bucket = dayBuckets.get(iso);
+        if (bucket) {
+          bucket.engagement += postEng;
+        }
+      }
+    }
+
+    const avgEngagementRate = followersCount > 0 && posts.length > 0
+      ? Number(((totalPostEngagements / (posts.length * followersCount)) * 100).toFixed(2))
+      : 0;
+
+    const topPosts = [...posts]
+      .map((p) => ({
+        id: p.id,
+        caption: p.caption || '',
+        mediaType: p.media_type || 'IMAGE',
+        imageUrl: p.thumbnail_url || p.media_url || null,
+        permalink: p.permalink || null,
+        timestamp: p.timestamp || null,
+        likes: Number(p.like_count || 0),
+        comments: Number(p.comments_count || 0),
+        totalEngagement: Number(p.like_count || 0) + Number(p.comments_count || 0)
+      }))
+      .sort((a, b) => b.totalEngagement - a.totalEngagement)
+      .slice(0, 5);
+
+    const contentMix = [
+      { name: 'Images', value: contentMixCounts.IMAGE },
+      { name: 'Videos / Reels', value: contentMixCounts.VIDEO },
+      { name: 'Carousels', value: contentMixCounts.CAROUSEL_ALBUM }
+    ].filter((item) => item.value > 0);
+
+    const timeSeries = Array.from(dayBuckets.values());
+    const netFollowerChange = timeSeries.reduce((sum, item) => sum + item.followersChange, 0);
+
+    res.json({
+      success: true,
+      days,
+      account: {
+        instagramUserId: currentIgId,
+        username,
+        authProvider,
+        followersCount,
+        followsCount,
+        mediaCount
+      },
+      summary: {
+        totalReach,
+        totalPostEngagements,
+        avgEngagementRate,
+        netFollowerChange
+      },
+      growthSource,
+      growthUnavailableReason,
+      timeSeries,
+      ageDistribution,
+      demographicsUnavailableReason,
+      contentMix,
+      topPosts
+    });
+  } catch (error: any) {
+    console.error('[Analytics Detailed] Error:', error.response?.data || error.message);
+    res.status(500).json({
+      error: 'Failed to load detailed analytics',
+      details: error.response?.data?.error?.message || error.message
+    });
+  }
+});
+
 app.post('/api/automation/rules', verifyFirebaseToken, async (req: any, res) => {
   const firebaseUid = req.firebaseUid;
   const {

@@ -174,6 +174,66 @@ export async function fetchDashboardOverview(days: 7 | 30 = 7): Promise<Dashboar
   return await response.json();
 }
 
+export interface DetailedAnalyticsData {
+  days: number;
+  account: {
+    instagramUserId: string;
+    username: string;
+    authProvider: 'instagram' | 'facebook';
+    followersCount: number;
+    followsCount: number;
+    mediaCount: number;
+  };
+  summary: {
+    totalReach: number;
+    totalPostEngagements: number;
+    avgEngagementRate: number;
+    netFollowerChange: number;
+  };
+  growthSource: 'meta' | 'snapshots' | 'unavailable';
+  growthUnavailableReason: string | null;
+  timeSeries: Array<{
+    iso: string;
+    date: string;
+    reach: number;
+    engagement: number;
+    followersChange: number;
+  }>;
+  ageDistribution: Array<{ name: string; value: number }>;
+  demographicsUnavailableReason: string | null;
+  contentMix: Array<{ name: string; value: number }>;
+  topPosts: Array<{
+    id: string;
+    caption: string;
+    mediaType: string;
+    imageUrl: string | null;
+    permalink: string | null;
+    timestamp: string | null;
+    likes: number;
+    comments: number;
+    totalEngagement: number;
+  }>;
+}
+
+/**
+ * Fetch detailed real analytics for the currently connected Instagram account
+ */
+export async function fetchDetailedAnalytics(days: 7 | 30 = 7): Promise<DetailedAnalyticsData> {
+  const token = await getAuthToken();
+  const response = await fetch(`${API_BASE}/analytics-detailed?days=${days}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch detailed analytics');
+  }
+
+  return await response.json();
+}
+
 /**
  * Format large numbers (e.g., 12500 -> "12.5K")
  */
