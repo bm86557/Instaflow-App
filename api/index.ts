@@ -131,6 +131,12 @@ async function saveUserData(firebaseUid: string, data: any) {
   }
 }
 
+function getInstagramGraphBase(userData?: { instagramAuthProvider?: string | null } | null): string {
+  return userData?.instagramAuthProvider === 'instagram'
+    ? 'https://graph.instagram.com/v21.0'
+    : 'https://graph.facebook.com/v19.0';
+}
+
 async function saveInstagramConnection(
   firebaseUid: string,
   accessToken: string,
@@ -143,12 +149,14 @@ async function saveInstagramConnection(
   instagramProfile?: {
     username?: string | null;
     profilePictureUrl?: string | null;
-  }
+  },
+  authProvider: 'facebook' | 'instagram' = 'facebook'
 ) {
   try {
     const userData: any = {
       instagramAccessToken: accessToken,
       instagramUserId: instagramUserId,
+      instagramAuthProvider: authProvider,
       connectedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     };
@@ -233,13 +241,14 @@ async function verifyRuleOwnership(ruleId: string, userId: string) {
 async function sendReplyToComment(
   commentId: string,
   replyMessage: string,
-  accessToken: string
+  accessToken: string,
+  graphBase = 'https://graph.facebook.com/v19.0'
 ) {
   try {
     console.log('[Instagram API] Sending reply to comment:', commentId);
 
     const response = await axios.post(
-      `https://graph.facebook.com/v19.0/${commentId}/replies`,
+      `${graphBase}/${commentId}/replies`,
       {
         message: replyMessage
       },
@@ -269,11 +278,12 @@ async function sendPrivateReplyToComment(
   instagramUserId: string,
   commentId: string,
   dmMessage: string,
-  accessToken: string
+  accessToken: string,
+  graphBase = 'https://graph.facebook.com/v19.0'
 ) {
   try {
     const response = await axios.post(
-      `https://graph.facebook.com/v19.0/${instagramUserId}/messages`,
+      `${graphBase}/${instagramUserId}/messages`,
       { recipient: { comment_id: commentId }, message: { text: dmMessage } },
       { params: { access_token: accessToken } }
     );
@@ -288,11 +298,12 @@ async function sendDirectMessage(
   instagramUserId: string,
   recipientId: string,
   dmMessage: string,
-  accessToken: string
+  accessToken: string,
+  graphBase = 'https://graph.facebook.com/v19.0'
 ) {
   try {
     const response = await axios.post(
-      `https://graph.facebook.com/v19.0/${instagramUserId}/messages`,
+      `${graphBase}/${instagramUserId}/messages`,
       { recipient: { id: recipientId }, message: { text: dmMessage } },
       { params: { access_token: accessToken } }
     );
@@ -646,8 +657,9 @@ async function processComment(instagramUserId: string, commentData: any) {
       }
     }
 
+    const graphBase = getInstagramGraphBase(userData);
     const replyResult = matchedRule.replyMessage
-      ? await sendReplyToComment(commentId, matchedRule.replyMessage, accessToken)
+      ? await sendReplyToComment(commentId, matchedRule.replyMessage, accessToken, graphBase)
       : { success: false, error: 'No comment reply message configured' };
 
     let dmResult: { success: boolean; messageId?: string | null; error?: string } | null = null;
@@ -656,7 +668,8 @@ async function processComment(instagramUserId: string, commentData: any) {
         instagramUserId,
         commentId,
         matchedRule.dmMessage,
-        accessToken
+        accessToken,
+        graphBase
       );
     }
 
@@ -743,7 +756,8 @@ async function pollCommentsForUser(firebaseUid: string) {
     return { checkedMedia: 0, checkedComments: 0, skipped: 'Instagram not connected' };
   }
 
-  const mediaRes = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, {
+  const graphBase = getInstagramGraphBase(userData);
+  const mediaRes = await axios.get(`${graphBase}/${instagramUserId}/media`, {
     params: {
       fields: 'id,timestamp',
       limit: 10,
@@ -756,7 +770,7 @@ async function pollCommentsForUser(firebaseUid: string) {
 
   for (const media of mediaList) {
     try {
-      const commentsRes = await axios.get(`https://graph.facebook.com/v19.0/${media.id}/comments`, {
+      const commentsRes = await axios.get(`${graphBase}/${media.id}/comments`, {
         params: {
           fields: 'id,text,timestamp,from,username',
           limit: 25,
@@ -1033,6 +1047,139 @@ app.get('/auth/instagram/callback', async (req, res) => {
   return app._router.handle(Object.assign(req, { url: '/api/auth/instagram/callback' + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '') }), res, () => {});
 });
 
+// Direct Instagram Login (No Facebook required) - Get OAuth URL
+app.get('/api/auth/instagram-direct/url', verifyFirebaseToken, (req: any, res) => {
+  const firebaseUid = req.firebaseUid;
+  (req.session as any).firebaseUid = firebaseUid;
+
+  const INSTAGRAM_APP_ID = process.env.INSTAGRAM_APP_ID?.trim();
+  const INSTAGRAM_APP_SECRET = process.env.INSTAGRAM_APP_SECRET?.trim();
+
+  if (!INSTAGRAM_APP_ID || !INSTAGRAM_APP_SECRET) {
+    return res.status(500).json({
+      error: 'Missing INSTAGRAM_APP_ID or INSTAGRAM_APP_SECRET in environment variables'
+    });
+  }
+
+  const APP_URL = resolvePublicAppUrl(req);
+  (req.session as any).appUrl = APP_URL;
+  const REDIRECT_URI = `${APP_URL}/api/auth/instagram-direct/callback`;
+
+  const scope = [
+    'instagram_business_basic',
+    'instagram_business_manage_messages',
+    'instagram_business_manage_comments',
+    'instagram_business_content_publish'
+  ].join(',');
+
+  const authUrl = `https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=1&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  res.json({ url: authUrl });
+});
+
+// Direct Instagram Login - OAuth Callback
+app.get('/api/auth/instagram-direct/callback', async (req, res) => {
+  const { code } = req.query;
+  const INSTAGRAM_APP_ID = process.env.INSTAGRAM_APP_ID?.trim();
+  const INSTAGRAM_APP_SECRET = process.env.INSTAGRAM_APP_SECRET?.trim();
+
+  const APP_URL = (req.session as any).appUrl || resolvePublicAppUrl(req);
+  const REDIRECT_URI = `${APP_URL}/api/auth/instagram-direct/callback`;
+
+  if (!code) {
+    return res.status(400).send(errorPage('NO_CODE', 'No authorization code received from Instagram.'));
+  }
+
+  try {
+    const cleanCode = String(code).replace(/#_$/, '');
+    const form = new URLSearchParams({
+      client_id: INSTAGRAM_APP_ID || '',
+      client_secret: INSTAGRAM_APP_SECRET || '',
+      grant_type: 'authorization_code',
+      redirect_uri: REDIRECT_URI,
+      code: cleanCode
+    });
+
+    const tokenRes = await axios.post('https://api.instagram.com/oauth/access_token', form.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+
+    const shortLivedToken = tokenRes.data?.access_token;
+    if (!shortLivedToken) {
+      return res.send(errorPage('TOKEN_ERROR', 'Instagram did not return an access token.'));
+    }
+
+    let finalToken = shortLivedToken;
+    let expiresIn: number | null = null;
+    try {
+      const longRes = await axios.get('https://graph.instagram.com/access_token', {
+        params: {
+          grant_type: 'ig_exchange_token',
+          client_secret: INSTAGRAM_APP_SECRET,
+          access_token: shortLivedToken
+        }
+      });
+      if (longRes.data?.access_token) {
+        finalToken = longRes.data.access_token;
+        expiresIn = longRes.data.expires_in ?? null;
+      }
+    } catch (exchangeErr: any) {
+      console.warn('[Instagram Direct] Long-lived token exchange failed:', exchangeErr.response?.data || exchangeErr.message);
+    }
+
+    const meRes = await axios.get('https://graph.instagram.com/v21.0/me', {
+      params: {
+        fields: 'user_id,username,profile_picture_url',
+        access_token: finalToken
+      }
+    });
+
+    const instagramUserId = String(meRes.data?.user_id || meRes.data?.id || tokenRes.data?.user_id || '');
+    const firebaseUid = (req.session as any).firebaseUid;
+    if (!firebaseUid) return res.send(errorPage('SESSION_ERROR', 'Session expired. Please try connecting again.'));
+    if (!instagramUserId) return res.send(errorPage('PROFILE_ERROR', 'Could not determine your Instagram Business/Creator user ID.'));
+
+    const saved = await saveInstagramConnection(
+      firebaseUid,
+      finalToken,
+      instagramUserId,
+      {
+        tokenExpiresInSeconds: expiresIn,
+        tokenType: 'bearer',
+        tokenExpiresAt: typeof expiresIn === 'number' ? new Date(Date.now() + expiresIn * 1000) : null
+      },
+      {
+        username: meRes.data?.username || null,
+        profilePictureUrl: meRes.data?.profile_picture_url || null
+      },
+      'instagram'
+    );
+
+    if (!saved) return res.send(errorPage('SAVE_ERROR', 'Failed to save Instagram connection.'));
+
+    res.send(`
+      <html>
+        <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #0f172a; color: white;">
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({ type: 'INSTAGRAM_AUTH_SUCCESS' }, '*');
+              window.close();
+            } else {
+              window.location.href = '/';
+            }
+          </script>
+          <div style="text-align: center;">
+            <h2 style="color: #6366f1;">Instagram Connected!</h2>
+            <p style="opacity: 0.6;">This window will close automatically.</p>
+          </div>
+        </body>
+      </html>
+    `);
+  } catch (error: any) {
+    console.error('[Instagram Direct OAuth Error]:', error.response?.data || error.message);
+    res.send(errorPage('OAUTH_ERROR', error.response?.data?.error_message || error.response?.data?.error?.message || error.message));
+  }
+});
+
 // Logout
 app.post('/api/auth/logout', (req: any, res) => {
   req.session = null;
@@ -1076,14 +1223,20 @@ app.get('/api/user/status', verifyFirebaseToken, async (req: any, res) => {
 
     if (instagramUserId && instagramAccessToken) {
       try {
-        const validationResponse = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}`, {
+        const graphBase = getInstagramGraphBase(userData);
+        const validationPath = userData.instagramAuthProvider === 'instagram' ? 'me' : instagramUserId;
+        const validationFields = userData.instagramAuthProvider === 'instagram'
+          ? 'user_id,username,profile_picture_url'
+          : 'id,username,profile_picture_url';
+        const validationResponse = await axios.get(`${graphBase}/${validationPath}`, {
           params: {
-            fields: 'id,username,profile_picture_url',
+            fields: validationFields,
             access_token: instagramAccessToken
           }
         });
 
-        if (validationResponse.data?.id === instagramUserId) {
+        const returnedId = String(validationResponse.data?.user_id || validationResponse.data?.id || '');
+        if (returnedId && (returnedId === String(instagramUserId) || userData.instagramAuthProvider === 'instagram')) {
           isConnected = true;
           instagramUsername = validationResponse.data.username || instagramUsername;
           instagramProfilePictureUrl = validationResponse.data.profile_picture_url || instagramProfilePictureUrl;
@@ -1980,10 +2133,10 @@ app.get('/api/ai/health', (req, res) => {
 // SCHEDULER HELPERS & ROUTES (inlined from schedulerService & scheduler.routes)
 // ============================================================================
 
-async function waitForContainerReady(creationId: string, accessToken: string, maxAttempts = 18, delayMs = 2500): Promise<{ ready: boolean; error?: string }> {
+async function waitForContainerReady(creationId: string, accessToken: string, graphBase = 'https://graph.facebook.com/v19.0', maxAttempts = 18, delayMs = 2500): Promise<{ ready: boolean; error?: string }> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const statusRes = await axios.get(`https://graph.facebook.com/v19.0/${creationId}`, {
+      const statusRes = await axios.get(`${graphBase}/${creationId}`, {
         params: { fields: 'status_code,status', access_token: accessToken }
       });
       const statusCode = statusRes.data?.status_code;
@@ -2006,8 +2159,10 @@ async function publishInstagramPost(params: {
   mediaItems: Array<{ url: string; isVideo?: boolean }>;
   caption?: string;
   userTags?: string[];
+  graphBase?: string;
 }): Promise<{ success: boolean; publishedMediaId?: string; error?: string }> {
   const { instagramUserId, accessToken, mediaType, mediaItems, caption, userTags } = params;
+  const graphBase = params.graphBase || 'https://graph.facebook.com/v19.0';
   if (!mediaItems || mediaItems.length === 0) return { success: false, error: 'At least one media URL is required' };
 
   const cleanTags = Array.isArray(userTags)
@@ -2034,16 +2189,16 @@ async function publishInstagramPost(params: {
           childBody.image_url = item.url;
           if (formattedUserTags) childBody.user_tags = formattedUserTags;
         }
-        const childRes = await axios.post(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, childBody);
+        const childRes = await axios.post(`${graphBase}/${instagramUserId}/media`, childBody);
         const childId = childRes.data?.id;
         if (!childId) return { success: false, error: 'Failed to create carousel child container' };
         if (item.isVideo) {
-          const check = await waitForContainerReady(childId, accessToken);
+          const check = await waitForContainerReady(childId, accessToken, graphBase);
           if (!check.ready) return { success: false, error: check.error };
         }
         childIds.push(childId);
       }
-      const parentRes = await axios.post(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, {
+      const parentRes = await axios.post(`${graphBase}/${instagramUserId}/media`, {
         media_type: 'CAROUSEL',
         children: childIds,
         caption: caption || '',
@@ -2055,30 +2210,30 @@ async function publishInstagramPost(params: {
       const storyBody: Record<string, any> = { media_type: 'STORIES', access_token: accessToken };
       if (first.isVideo) storyBody.video_url = first.url;
       else storyBody.image_url = first.url;
-      const res = await axios.post(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, storyBody);
+      const res = await axios.post(`${graphBase}/${instagramUserId}/media`, storyBody);
       creationId = res.data?.id;
     } else if (mediaType === 'REELS' || mediaItems[0].isVideo) {
       const reelBody: Record<string, any> = { media_type: 'REELS', video_url: mediaItems[0].url, caption: caption || '', access_token: accessToken };
       if (formattedUserTags) reelBody.user_tags = formattedUserTags;
-      const res = await axios.post(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, reelBody);
+      const res = await axios.post(`${graphBase}/${instagramUserId}/media`, reelBody);
       creationId = res.data?.id;
     } else {
       const imageBody: Record<string, any> = { image_url: mediaItems[0].url, caption: caption || '', access_token: accessToken };
       if (formattedUserTags) imageBody.user_tags = formattedUserTags;
-      const res = await axios.post(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, imageBody);
+      const res = await axios.post(`${graphBase}/${instagramUserId}/media`, imageBody);
       creationId = res.data?.id;
     }
 
     if (!creationId) return { success: false, error: 'Instagram did not return a creation_id' };
 
     if (mediaType !== 'IMAGE' || mediaItems.some((m) => m.isVideo)) {
-      const ready = await waitForContainerReady(creationId, accessToken);
+      const ready = await waitForContainerReady(creationId, accessToken, graphBase);
       if (!ready.ready) return { success: false, error: ready.error };
     } else {
       await new Promise((r) => setTimeout(r, 1500));
     }
 
-    const publishRes = await axios.post(`https://graph.facebook.com/v19.0/${instagramUserId}/media_publish`, null, {
+    const publishRes = await axios.post(`${graphBase}/${instagramUserId}/media_publish`, null, {
       params: { creation_id: creationId, access_token: accessToken }
     });
     return { success: true, publishedMediaId: publishRes.data?.id };
@@ -2125,7 +2280,8 @@ async function publishScheduledPostById(postId: string, force = false): Promise<
       mediaType: postData.mediaType || 'IMAGE',
       mediaItems,
       caption: postData.mediaType === 'STORIES' ? '' : (postData.caption || ''),
-      userTags: postData.mediaType === 'STORIES' ? [] : (postData.userTags || [])
+      userTags: postData.mediaType === 'STORIES' ? [] : (postData.userTags || []),
+      graphBase: getInstagramGraphBase(userData)
     });
 
     if (!result.success || !result.publishedMediaId) {

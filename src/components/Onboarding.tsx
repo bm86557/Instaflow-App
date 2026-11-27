@@ -11,7 +11,7 @@ export default function Onboarding({ onSuccess }: OnboardingProps) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleConnect = async () => {
+  const handleConnect = async (mode: 'facebook' | 'instagram' = 'instagram') => {
     setIsConnecting(true);
     setError(null);
     
@@ -24,10 +24,11 @@ export default function Onboarding({ onSuccess }: OnboardingProps) {
 
       // Get Firebase ID token
       const idToken = await user.getIdToken();
-      console.log('[Onboarding] Got Firebase token, requesting OAuth URL');
+      const endpoint = mode === 'instagram' ? '/api/auth/instagram-direct/url' : '/api/auth/instagram/url';
+      console.log('[Onboarding] Got Firebase token, requesting OAuth URL from', endpoint);
       
       // Request OAuth URL with Firebase token
-      const response = await fetch('/api/auth/instagram/url', {
+      const response = await fetch(endpoint, {
         headers: {
           'Authorization': `Bearer ${idToken}`
         }
@@ -119,21 +120,34 @@ export default function Onboarding({ onSuccess }: OnboardingProps) {
             ))}
           </div>
 
-          <button 
-            onClick={handleConnect}
-            disabled={isConnecting}
-            className="group w-full max-w-sm mx-auto bg-white hover:scale-[1.02] active:scale-[0.98] transition-all py-5 rounded-2xl flex items-center justify-center gap-3 shadow-2xl shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isConnecting ? (
-              <Loader2 className="w-6 h-6 text-indigo-900 animate-spin" />
-            ) : (
-              <Instagram className="w-6 h-6 text-indigo-900" />
-            )}
-            <span className="text-indigo-900 font-black uppercase tracking-[0.15em] text-sm text-center">
-              {isConnecting ? 'Waiting for Token...' : 'Connect Business Account'}
-            </span>
-            <ArrowRight className="w-5 h-5 text-indigo-900 group-hover:translate-x-1 transition-transform" />
-          </button>
+          <div className="flex flex-col gap-3 max-w-sm mx-auto">
+            <button 
+              onClick={() => handleConnect('instagram')}
+              disabled={isConnecting}
+              className="group w-full bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 hover:scale-[1.02] active:scale-[0.98] transition-all py-5 rounded-2xl flex items-center justify-center gap-3 shadow-2xl shadow-pink-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isConnecting ? (
+                <Loader2 className="w-6 h-6 text-white animate-spin" />
+              ) : (
+                <Instagram className="w-6 h-6 text-white" />
+              )}
+              <span className="text-white font-black uppercase tracking-[0.12em] text-sm text-center">
+                {isConnecting ? 'Waiting for Token...' : 'Connect with Instagram'}
+              </span>
+              <ArrowRight className="w-5 h-5 text-white group-hover:translate-x-1 transition-transform" />
+            </button>
+
+            <button 
+              onClick={() => handleConnect('facebook')}
+              disabled={isConnecting}
+              className="group w-full bg-white/10 hover:bg-white/15 border border-white/15 hover:scale-[1.01] active:scale-[0.99] transition-all py-3.5 rounded-2xl flex items-center justify-center gap-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="text-white/80 font-bold uppercase tracking-[0.12em] text-xs text-center">
+                Or Connect via Facebook Page
+              </span>
+              <ArrowRight className="w-4 h-4 text-white/60 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
 
           {error && (
             <div className="mt-8 p-6 glass border-red-500/30 rounded-2xl text-left bg-red-500/5">
