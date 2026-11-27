@@ -1612,11 +1612,13 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
   try {
     const userData = await getUserData(firebaseUid);
 
+    const currentIgId = userData?.instagramUserId ? String(userData.instagramUserId) : null;
+
     const rulesSnapshot = await db.collection('automationRules')
       .where('userId', '==', firebaseUid)
       .where('enabled', '==', true)
       .get();
-    const activeAutomations = rulesSnapshot.size;
+    const activeAutomations = rulesSnapshot.docs.filter((doc) => !currentIgId || String(doc.data()?.instagramUserId || '') === currentIgId).length;
 
     let posts: any[] = [];
     if (userData?.instagramAccessToken && userData?.instagramUserId) {
@@ -1681,6 +1683,7 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
     };
 
     const recentActivity = commentsSnapshot.docs
+      .filter((doc) => !currentIgId || String(doc.data()?.instagramUserId || '') === currentIgId)
       .map((doc) => {
         const c = doc.data();
         const reply = repliedCommentMap.get(c.commentId);
@@ -1817,14 +1820,19 @@ app.get('/api/automation/rules', verifyFirebaseToken, async (req: any, res) => {
   const firebaseUid = req.firebaseUid;
 
   try {
+    const userDoc = await db.collection('users').doc(firebaseUid).get();
+    const currentIgId = userDoc.exists && userDoc.data()?.instagramUserId ? String(userDoc.data()?.instagramUserId) : null;
+
     const snapshot = await db.collection('automationRules')
       .where('userId', '==', firebaseUid)
       .get();
 
-    const rules = snapshot.docs.map(doc => ({
-      ruleId: doc.id,
-      ...doc.data()
-    }));
+    const rules = snapshot.docs
+      .map(doc => ({
+        ruleId: doc.id,
+        ...doc.data()
+      }))
+      .filter((r: any) => !currentIgId || String(r.instagramUserId || '') === currentIgId);
 
     rules.sort((a: any, b: any) => (a.priority || 0) - (b.priority || 0));
 
@@ -2418,9 +2426,13 @@ app.post('/api/scheduler/posts', verifyFirebaseToken, async (req: any, res) => {
 app.get('/api/scheduler/posts', verifyFirebaseToken, async (req: any, res) => {
   const firebaseUid = req.firebaseUid;
   try {
+    const userData = await getUserData(firebaseUid);
+    const currentIgId = userData?.instagramUserId ? String(userData.instagramUserId) : null;
+
     const snapshot = await db.collection('scheduledPosts').where('userId', '==', firebaseUid).get();
     const posts = snapshot.docs
       .map((doc) => ({ postId: doc.id, ...doc.data() }))
+      .filter((p: any) => !currentIgId || String(p.instagramUserId || '') === currentIgId)
       .sort((a: any, b: any) => new Date(b.scheduledAt || 0).getTime() - new Date(a.scheduledAt || 0).getTime());
     res.json({ success: true, posts });
   } catch (error: any) {
