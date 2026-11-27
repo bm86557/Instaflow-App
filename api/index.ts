@@ -1070,10 +1070,11 @@ app.get('/api/auth/instagram-direct/url', verifyFirebaseToken, (req: any, res) =
     'instagram_business_basic',
     'instagram_business_manage_messages',
     'instagram_business_manage_comments',
-    'instagram_business_content_publish'
+    'instagram_business_content_publish',
+    'instagram_business_manage_insights'
   ].join(',');
 
-  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${scope}&state=${encodeURIComponent(state)}`;
+  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${REDIRECT_URI}&response_type=code&scope=${encodeURIComponent(scope)}&state=${encodeURIComponent(state)}`;
   console.log('[Instagram Direct Auth] Generated OAuth URL with redirect_uri:', REDIRECT_URI);
   res.json({ url: authUrl });
 });
@@ -1102,18 +1103,23 @@ app.get('/api/auth/instagram-direct/callback', async (req, res) => {
   }
 
   try {
-    const cleanCode = String(code).replace(/#_$/, '');
-    const form = new URLSearchParams({
-      client_id: INSTAGRAM_APP_ID || '',
-      client_secret: INSTAGRAM_APP_SECRET || '',
-      grant_type: 'authorization_code',
-      redirect_uri: REDIRECT_URI,
-      code: cleanCode
-    });
+    const cleanCode = String(code).split('#')[0].trim();
+    const formData = new FormData();
+    formData.append('client_id', INSTAGRAM_APP_ID || '');
+    formData.append('client_secret', INSTAGRAM_APP_SECRET || '');
+    formData.append('grant_type', 'authorization_code');
+    formData.append('redirect_uri', REDIRECT_URI);
+    formData.append('code', cleanCode);
 
-    const tokenRes = await axios.post('https://api.instagram.com/oauth/access_token', form.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    const tokenFetchRes = await fetch('https://api.instagram.com/oauth/access_token', {
+      method: 'POST',
+      body: formData
     });
+    const tokenData: any = await tokenFetchRes.json();
+    if (!tokenFetchRes.ok) {
+      throw { response: { data: tokenData } };
+    }
+    const tokenRes = { data: tokenData };
 
     const shortLivedToken = tokenRes.data?.access_token;
     if (!shortLivedToken) {
