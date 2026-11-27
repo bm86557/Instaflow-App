@@ -692,6 +692,7 @@ async function processComment(instagramUserId: string, commentData: any) {
 
       await db.collection('replyHistory').add({
         userId: userId,
+        instagramUserId: instagramUserId,
         ruleId: matchedRule.ruleId,
         instagramMediaId: mediaId,
         instagramCommentId: commentId,
@@ -719,6 +720,7 @@ async function processComment(instagramUserId: string, commentData: any) {
 
       await db.collection('replyHistory').add({
         userId: userId,
+        instagramUserId: instagramUserId,
         ruleId: matchedRule.ruleId,
         instagramMediaId: mediaId,
         instagramCommentId: commentId,
@@ -1476,34 +1478,20 @@ app.get('/api/instagram/auto-replies', verifyFirebaseToken, async (req: any, res
   const firebaseUid = req.firebaseUid;
   
   try {
-    const statsDoc = await db.collection('users')
-      .doc(firebaseUid)
-      .collection('stats')
-      .doc('autoReplies')
+    const userData = await getUserData(firebaseUid);
+    const currentIgId = userData?.instagramUserId ? String(userData.instagramUserId) : null;
+
+    const replySnapshot = await db.collection('replyHistory')
+      .where('userId', '==', firebaseUid)
       .get();
 
-    if (!statsDoc.exists) {
-      await db.collection('users')
-        .doc(firebaseUid)
-        .collection('stats')
-        .doc('autoReplies')
-        .set({
-          totalCount: 0,
-          lastReplyAt: null,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-      
-      return res.json({
-        autoReplies: 0,
-        lastReplyAt: null
-      });
-    }
-    
-    const statsData = statsDoc.data();
-    
+    const accountReplies = replySnapshot.docs
+      .map((doc) => doc.data())
+      .filter((d: any) => d.status === 'sent' && (!currentIgId || String(d.instagramUserId || '') === currentIgId));
+
     res.json({
-      autoReplies: statsData?.totalCount || 0,
-      lastReplyAt: statsData?.lastReplyAt || null
+      autoReplies: accountReplies.length,
+      lastReplyAt: null
     });
     
   } catch (error: any) {
@@ -1703,6 +1691,7 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
 
     replySnapshot.docs.forEach((doc) => {
       const d = doc.data();
+      if (currentIgId && String(d.instagramUserId || '') !== currentIgId) return;
       const iso = toIso(d.createdAt).slice(0, 10);
       const bucket = dayBuckets.get(iso);
       if (bucket) {
