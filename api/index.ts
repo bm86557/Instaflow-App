@@ -1061,9 +1061,10 @@ app.get('/api/auth/instagram-direct/url', verifyFirebaseToken, (req: any, res) =
     });
   }
 
-  const APP_URL = resolvePublicAppUrl(req);
+  const APP_URL = resolvePublicAppUrl(req).replace(/\/+$/, '');
   (req.session as any).appUrl = APP_URL;
   const REDIRECT_URI = `${APP_URL}/api/auth/instagram-direct/callback`;
+  const state = Buffer.from(JSON.stringify({ uid: firebaseUid, redirectUri: REDIRECT_URI })).toString('base64url');
 
   const scope = [
     'instagram_business_basic',
@@ -1072,18 +1073,29 @@ app.get('/api/auth/instagram-direct/url', verifyFirebaseToken, (req: any, res) =
     'instagram_business_content_publish'
   ].join(',');
 
-  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${scope}`;
+  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${scope}&state=${encodeURIComponent(state)}`;
+  console.log('[Instagram Direct Auth] Generated OAuth URL with redirect_uri:', REDIRECT_URI);
   res.json({ url: authUrl });
 });
 
 // Direct Instagram Login - OAuth Callback
 app.get('/api/auth/instagram-direct/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
   const INSTAGRAM_APP_ID = process.env.INSTAGRAM_APP_ID?.trim();
   const INSTAGRAM_APP_SECRET = process.env.INSTAGRAM_APP_SECRET?.trim();
 
-  const APP_URL = (req.session as any).appUrl || resolvePublicAppUrl(req);
-  const REDIRECT_URI = `${APP_URL}/api/auth/instagram-direct/callback`;
+  let stateData: { uid?: string; redirectUri?: string } = {};
+  if (typeof state === 'string' && state) {
+    try {
+      stateData = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+    } catch {
+      // ignore malformed state
+    }
+  }
+
+  const APP_URL = String((req.session as any).appUrl || resolvePublicAppUrl(req)).replace(/\/+$/, '');
+  const REDIRECT_URI = stateData.redirectUri || `${APP_URL}/api/auth/instagram-direct/callback`;
+  console.log('[Instagram Direct Callback] Exchanging code with redirect_uri:', REDIRECT_URI);
 
   if (!code) {
     return res.status(400).send(errorPage('NO_CODE', 'No authorization code received from Instagram.'));
@@ -1134,7 +1146,7 @@ app.get('/api/auth/instagram-direct/callback', async (req, res) => {
     });
 
     const instagramUserId = String(meRes.data?.user_id || meRes.data?.id || tokenRes.data?.user_id || '');
-    const firebaseUid = (req.session as any).firebaseUid;
+    const firebaseUid = stateData.uid || (req.session as any).firebaseUid;
     if (!firebaseUid) return res.send(errorPage('SESSION_ERROR', 'Session expired. Please try connecting again.'));
     if (!instagramUserId) return res.send(errorPage('PROFILE_ERROR', 'Could not determine your Instagram Business/Creator user ID.'));
 
