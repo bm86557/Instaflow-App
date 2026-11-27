@@ -1,7 +1,7 @@
 // src/services/automationService.ts
 
 import { auth } from '../lib/firebase';
-import { CreateRuleRequest, UpdateRuleRequest, AutomationRule } from '../types/automationTypes';
+import { CreateRuleRequest, UpdateRuleRequest, AutomationRule, InstagramPost } from '../types/automationTypes';
 
 const API_BASE = '/api/automation';
 
@@ -189,4 +189,24 @@ export async function pollComments(): Promise<{ checkedMedia: number; checkedCom
   }
 
   return await response.json();
+}
+
+/**
+ * Fetch all posts of the connected Instagram Business account
+ */
+export async function getInstagramPosts(): Promise<InstagramPost[]> {
+  const token = await getAuthToken();
+  const response = await fetch('/api/instagram/posts', {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch Instagram posts');
+  }
+
+  const data = await response.json();
+  return data.posts || [];
 }

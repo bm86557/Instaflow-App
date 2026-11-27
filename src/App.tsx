@@ -162,7 +162,7 @@ export default function App() {
               />
               
               <div className={`transition-all duration-500 ${isSidebarCollapsed ? 'pl-20' : 'pl-[260px]'} min-h-screen flex flex-col`}>
-                <TopBar />
+                <TopBar onDisconnect={() => setIsConnected(false)} />
                 
                 <main className="p-8 flex-1 max-w-[1600px] w-full mx-auto">
                   <AnimatePresence mode="wait">

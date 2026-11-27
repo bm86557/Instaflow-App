@@ -140,6 +140,40 @@ export async function fetchAllStats() {
   }
 }
 
+export interface DashboardOverviewData {
+  activeAutomations: number;
+  postsCount: number;
+  engagementSeries: Array<{ date: string; engagement: number; posts: number }>;
+  recentActivity: Array<{
+    id: string;
+    username: string;
+    text: string;
+    mediaId: string | null;
+    replyStatus: string | null;
+    replyMessage: string | null;
+    timestamp: string;
+  }>;
+}
+
+/**
+ * Fetch real dashboard overview (active rules, posts count, daily engagement series, live activity)
+ */
+export async function fetchDashboardOverview(days: 7 | 30 = 7): Promise<DashboardOverviewData> {
+  const token = await getAuthToken();
+  const response = await fetch(`${API_BASE}/dashboard-overview?days=${days}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to fetch dashboard overview');
+  }
+
+  return await response.json();
+}
+
 /**
  * Format large numbers (e.g., 12500 -> "12.5K")
  */

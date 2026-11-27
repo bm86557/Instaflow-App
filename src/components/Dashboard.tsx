@@ -5,8 +5,6 @@ import {
   TrendingUp, 
   Eye, 
   MessageCircle,
-  ArrowUpRight,
-  ArrowDownRight,
   MoreHorizontal,
   RefreshCw,
   AlertCircle
@@ -20,8 +18,13 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { MOCK_ANALYTICS } from '../constants';
-import { fetchAllStats, formatNumber, formatPercentage } from '../services/InstagramService';
+import {
+  fetchAllStats,
+  fetchDashboardOverview,
+  formatNumber,
+  formatPercentage,
+  DashboardOverviewData
+} from '../services/InstagramService';
 
 interface Stats {
   followers: number;
@@ -34,12 +37,14 @@ interface Stats {
 export default function Dashboard() {
   // State management
   const [stats, setStats] = useState<Stats | null>(null);
+  const [overview, setOverview] = useState<DashboardOverviewData | null>(null);
+  const [daysRange, setDaysRange] = useState<7 | 30>(7);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // Fetch stats function
-  const loadStats = async (isRefresh = false) => {
+  const loadStats = async (isRefresh = false, range: 7 | 30 = daysRange) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
@@ -48,11 +53,14 @@ export default function Dashboard() {
       }
       setError(null);
 
-      console.log('[Dashboard] Fetching Instagram stats...');
-      const data = await fetchAllStats();
-      console.log('[Dashboard] Stats loaded:', data);
-      
-      setStats(data);
+      console.log('[Dashboard] Fetching real Instagram stats & overview...');
+      const [statsData, overviewData] = await Promise.all([
+        fetchAllStats(),
+        fetchDashboardOverview(range)
+      ]);
+
+      setStats(statsData);
+      setOverview(overviewData);
     } catch (err: any) {
       console.error('[Dashboard] Error loading stats:', err);
       setError(err.message || 'Failed to load statistics');
@@ -64,8 +72,8 @@ export default function Dashboard() {
 
   // Initial load
   useEffect(() => {
-    loadStats();
-  }, []);
+    loadStats(false, daysRange);
+  }, [daysRange]);
 
   // Auto-refresh every 5 minutes
   useEffect(() => {
@@ -108,8 +116,7 @@ export default function Dashboard() {
       label: 'Total Followers', 
       value: formatNumber(stats.followers), 
       rawValue: stats.followers,
-      change: '+12%', 
-      trendingUp: true, 
+      subLabel: 'Connected account', 
       icon: Users, 
       color: 'text-blue-500' 
     },
@@ -117,8 +124,7 @@ export default function Dashboard() {
       label: 'Engagement Rate', 
       value: formatPercentage(stats.engagementRate), 
       rawValue: stats.engagementRate,
-      change: '+0.8%', 
-      trendingUp: true, 
+      subLabel: `Across ${overview?.postsCount ?? 0} posts`, 
       icon: TrendingUp, 
       color: 'text-purple-500' 
     },
@@ -126,8 +132,7 @@ export default function Dashboard() {
       label: 'Weekly Reach', 
       value: formatNumber(stats.weeklyReach), 
       rawValue: stats.weeklyReach,
-      change: '-2.4%', 
-      trendingUp: false, 
+      subLabel: 'Last 7 days', 
       icon: Eye, 
       color: 'text-pink-500' 
     },
@@ -135,8 +140,7 @@ export default function Dashboard() {
       label: 'Auto-Replies', 
       value: formatNumber(stats.autoReplies), 
       rawValue: stats.autoReplies,
-      change: '+24%', 
-      trendingUp: true, 
+      subLabel: `${overview?.activeAutomations ?? 0} rules active`, 
       icon: MessageCircle, 
       color: 'text-green-500' 
     },
@@ -212,7 +216,7 @@ export default function Dashboard() {
         <div>
           <h1 className="text-4xl font-bold text-white tracking-tight">System Overview</h1>
           <p className="text-white/40 mt-1">
-            3 Automations active • 2 Posts queued
+            {overview?.activeAutomations ?? 0} Automations active • {overview?.postsCount ?? 0} Instagram posts
             {stats?.lastUpdated && (
               <span className="ml-3">• Updated {formatLastUpdated(stats.lastUpdated)}</span>
             )}
@@ -249,9 +253,8 @@ export default function Dashboard() {
               <p className="text-sm font-medium text-white/40 uppercase tracking-widest">{stat.label}</p>
               <div className="flex items-end gap-2 mt-1">
                 <span className="text-3xl font-bold text-white">{stat.value}</span>
-                <span className={`text-xs font-bold flex items-center mb-1.5 ${stat.trendingUp ? 'text-green-400' : 'text-red-400'}`}>
-                  {stat.trendingUp ? <ArrowUpRight className="w-3 h-3 mr-0.5" /> : <ArrowDownRight className="w-3 h-3 mr-0.5" />}
-                  {stat.change}
+                <span className="text-xs font-medium text-white/40 mb-1.5">
+                  {stat.subLabel}
                 </span>
               </div>
             </div>
@@ -268,17 +271,21 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h2 className="text-xl font-bold text-white">Engagement Pulse</h2>
-              <p className="text-sm text-white/40">Past 7 days performance</p>
+              <p className="text-sm text-white/40">Past {daysRange} days performance</p>
             </div>
-            <select className="bg-white/5 text-sm border border-white/10 rounded-lg px-3 py-2 outline-none text-white cursor-pointer hover:bg-white/10 transition-colors">
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
+            <select
+              value={daysRange}
+              onChange={(e) => setDaysRange(e.target.value === '30' ? 30 : 7)}
+              className="bg-white/5 text-sm border border-white/10 rounded-lg px-3 py-2 outline-none text-white cursor-pointer hover:bg-white/10 transition-colors"
+            >
+              <option className="bg-slate-900" value={7}>Last 7 Days</option>
+              <option className="bg-slate-900" value={30}>Last 30 Days</option>
             </select>
           </div>
           
           <div className="h-[300px] w-full pt-4">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={MOCK_ANALYTICS}>
+              <AreaChart data={overview?.engagementSeries || []}>
                 <defs>
                   <linearGradient id="colorEngagement" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#ec4899" stopOpacity={0.3}/>
@@ -327,22 +334,37 @@ export default function Dashboard() {
             <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
           </div>
           <div className="space-y-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex gap-4 group">
-                <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex-shrink-0 flex items-center justify-center group-hover:bg-purple-500/20 transition-colors">
-                  <MessageCircle className="w-5 h-5 text-purple-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-white/80">
-                    <span className="font-bold text-white">@user_{i}</span> commented
-                  </p>
-                  <p className="text-[10px] uppercase font-bold text-white/30 tracking-widest mt-0.5">2 hours ago</p>
-                  <div className="mt-2 p-3 bg-white/5 rounded-xl text-xs italic text-white/60 line-clamp-2 border border-white/5">
-                    "This looks amazing! How can I get one?"
+            {(!overview?.recentActivity || overview.recentActivity.length === 0) ? (
+              <div className="text-center py-8 text-white/40 text-sm">
+                No recent comments or auto-replies yet.
+              </div>
+            ) : (
+              overview.recentActivity.map((item) => (
+                <div key={item.id} className="flex gap-4 group">
+                  <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex-shrink-0 flex items-center justify-center group-hover:bg-purple-500/20 transition-colors">
+                    <MessageCircle className="w-5 h-5 text-purple-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-white/80 truncate">
+                        <span className="font-bold text-white">@{item.username}</span> commented
+                      </p>
+                      {item.replyStatus === 'sent' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold uppercase">
+                          Replied
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] uppercase font-bold text-white/30 tracking-widest mt-0.5">
+                      {formatLastUpdated(item.timestamp)}
+                    </p>
+                    <div className="mt-2 p-3 bg-white/5 rounded-xl text-xs italic text-white/60 line-clamp-2 border border-white/5">
+                      "{item.text}"
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
           <button className="w-full mt-8 py-3 text-sm font-bold text-white/40 hover:text-white transition-colors bg-white/5 rounded-xl border border-white/5">
             View All Activity

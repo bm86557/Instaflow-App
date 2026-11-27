@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Moon, Sun, Bell, User, Instagram } from 'lucide-react';
+import { Search, Moon, Sun, Instagram, Unlink } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 import { MOCK_ACCOUNT } from '../constants';
 import { auth } from '../lib/firebase';
@@ -12,9 +12,40 @@ interface UserStatus {
   instagramProfilePictureUrl?: string;
 }
 
-export default function TopBar() {
+interface TopBarProps {
+  onDisconnect?: () => void;
+}
+
+export default function TopBar({ onDisconnect }: TopBarProps) {
   const { theme, toggleTheme } = useTheme();
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const handleDisconnectInstagram = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    try {
+      setDisconnecting(true);
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/user/disconnect', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${idToken}` }
+      });
+      if (res.ok) {
+        onDisconnect?.();
+        window.location.reload();
+      } else {
+        const text = await res.text();
+        console.error('[TopBar] Disconnect failed:', res.status, text);
+        alert(`Disconnect failed (${res.status}). If you haven't restarted npm run dev, please restart it and try again.`);
+      }
+    } catch (err: any) {
+      console.error('[TopBar] Error disconnecting Instagram:', err);
+      alert('Disconnect failed: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -94,6 +125,17 @@ export default function TopBar() {
               alt={userStatus?.instagramUsername ? `@${userStatus.instagramUsername}` : MOCK_ACCOUNT.username}
             />
           </div>
+          {userStatus?.connected && (
+            <button
+              onClick={handleDisconnectInstagram}
+              disabled={disconnecting}
+              title="Disconnect Instagram account"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              <Unlink className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">{disconnecting ? 'Disconnecting...' : 'Disconnect'}</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
