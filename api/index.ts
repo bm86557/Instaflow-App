@@ -1670,7 +1670,7 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
       return new Date(0).toISOString();
     };
 
-    const recentActivity = commentsSnapshot.docs
+    let recentActivity = commentsSnapshot.docs
       .filter((doc) => !currentIgId || String(doc.data()?.instagramUserId || '') === currentIgId)
       .map((doc) => {
         const c = doc.data();
@@ -1689,6 +1689,38 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, 6);
 
+    if (recentActivity.length === 0 && posts.length > 0 && userData?.instagramAccessToken) {
+      const graphBase = getInstagramGraphBase(userData);
+      const liveComments: any[] = [];
+      for (const post of posts.slice(0, 5)) {
+        try {
+          const cRes = await axios.get(`${graphBase}/${post.id}/comments`, {
+            params: {
+              fields: 'id,text,timestamp,from,username',
+              limit: 10,
+              access_token: userData.instagramAccessToken
+            }
+          });
+          for (const c of cRes.data?.data || []) {
+            liveComments.push({
+              id: c.id,
+              username: c.from?.username || c.username || 'instagram_user',
+              text: c.text || '',
+              mediaId: post.id,
+              replyStatus: null,
+              replyMessage: null,
+              timestamp: c.timestamp ? toIso(c.timestamp) : new Date().toISOString()
+            });
+          }
+        } catch {
+          // ignore per-post comment fetch errors
+        }
+      }
+      recentActivity = liveComments
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 6);
+    }
+
     replySnapshot.docs.forEach((doc) => {
       const d = doc.data();
       if (currentIgId && String(d.instagramUserId || '') !== currentIgId) return;
@@ -1699,11 +1731,25 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
       }
     });
 
+    let engagementSeries = Array.from(dayBuckets.values());
+    const hasRecentEngagement = engagementSeries.some((b) => b.engagement > 0);
+    if (!hasRecentEngagement && posts.length > 0) {
+      engagementSeries = [...posts]
+        .filter((p) => p.timestamp)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .slice(-10)
+        .map((p) => ({
+          date: new Date(p.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          engagement: (p.like_count || 0) + (p.comments_count || 0),
+          posts: 1
+        }));
+    }
+
     res.json({
       success: true,
       activeAutomations,
       postsCount: posts.length,
-      engagementSeries: Array.from(dayBuckets.values()),
+      engagementSeries,
       recentActivity
     });
   } catch (error: any) {
