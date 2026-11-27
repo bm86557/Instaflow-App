@@ -1319,8 +1319,9 @@ app.get('/api/instagram/followers', verifyFirebaseToken, async (req: any, res) =
     }
     
     const { instagramAccessToken, instagramUserId } = userData;
+    const graphBase = getInstagramGraphBase(userData);
     
-    const response = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}`, {
+    const response = await axios.get(`${graphBase}/${instagramUserId}`, {
       params: {
         fields: 'followers_count',
         access_token: instagramAccessToken
@@ -1352,8 +1353,9 @@ app.get('/api/instagram/engagement', verifyFirebaseToken, async (req: any, res) 
     }
 
     const { instagramAccessToken, instagramUserId } = userData;
+    const graphBase = getInstagramGraphBase(userData);
     
-    const profileResponse = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}`, {
+    const profileResponse = await axios.get(`${graphBase}/${instagramUserId}`, {
       params: {
         fields: 'followers_count',
         access_token: instagramAccessToken
@@ -1362,7 +1364,7 @@ app.get('/api/instagram/engagement', verifyFirebaseToken, async (req: any, res) 
     
     const followersCount = profileResponse.data.followers_count;
     
-    const mediaResponse = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}/media`, {
+    const mediaResponse = await axios.get(`${graphBase}/${instagramUserId}/media`, {
       params: {
         fields: 'id,like_count,comments_count,timestamp,media_type',
         limit: 25,
@@ -1422,7 +1424,7 @@ app.get('/api/instagram/reach', verifyFirebaseToken, async (req: any, res) => {
     const now = Math.floor(Date.now() / 1000);
     const sevenDaysAgo = now - (7 * 24 * 60 * 60);
     
-    const insightsResponse = await axios.get(`https://graph.facebook.com/v19.0/${instagramUserId}/insights`, {
+    const insightsResponse = await axios.get(`${getInstagramGraphBase(userData)}/${instagramUserId}/insights`, {
       params: {
         metric: 'reach',
         period: 'day',
@@ -1525,7 +1527,8 @@ app.get('/api/instagram/posts', verifyFirebaseToken, async (req: any, res) => {
       return res.status(400).json({ error: 'Instagram account not connected' });
     }
 
-    const mediaResponse = await axios.get(`https://graph.facebook.com/v19.0/${userData.instagramUserId}/media`, {
+    const graphBase = getInstagramGraphBase(userData);
+    const mediaResponse = await axios.get(`${graphBase}/${userData.instagramUserId}/media`, {
       params: {
         fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
         limit: 25,
@@ -1557,8 +1560,9 @@ app.get('/api/instagram/posts/:mediaId/comments', verifyFirebaseToken, async (re
     }
 
     const { instagramAccessToken, instagramUserId } = userData;
+    const graphBase = getInstagramGraphBase(userData);
 
-    const commentsResponse = await axios.get(`https://graph.facebook.com/v19.0/${mediaId}/comments`, {
+    const commentsResponse = await axios.get(`${graphBase}/${mediaId}/comments`, {
       params: {
         fields: 'id,text,timestamp,from,username',
         limit: 100,
@@ -1617,7 +1621,8 @@ app.get('/api/instagram/dashboard-overview', verifyFirebaseToken, async (req: an
     let posts: any[] = [];
     if (userData?.instagramAccessToken && userData?.instagramUserId) {
       try {
-        const mediaResponse = await axios.get(`https://graph.facebook.com/v19.0/${userData.instagramUserId}/media`, {
+        const graphBase = getInstagramGraphBase(userData);
+        const mediaResponse = await axios.get(`${graphBase}/${userData.instagramUserId}/media`, {
           params: {
             fields: 'id,caption,timestamp,like_count,comments_count',
             limit: 50,
