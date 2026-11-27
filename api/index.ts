@@ -1072,7 +1072,7 @@ app.get('/api/auth/instagram-direct/url', verifyFirebaseToken, (req: any, res) =
     'instagram_business_content_publish'
   ].join(',');
 
-  const authUrl = `https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=1&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${scope}`;
   res.json({ url: authUrl });
 });
 
